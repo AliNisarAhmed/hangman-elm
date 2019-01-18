@@ -1,16 +1,32 @@
 module Main exposing (main)
 
+import Array
 import Browser
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
+import Process
+import Random
+import Random.Extra
+import Regex
+import Task
 import Word
 
 
+
+{- each word is broken into a list of LetterObj e.g. "elm" => [{letter: "e", isShowing: False}, ...] -}
+
+
 type alias LetterObj =
-    { letter : String
-    , isShowing : Bool
+    { isShowing : Bool
+    , letter : String
     }
+
+
+type GameCondition
+    = Win
+    | Lose
+    | Play
 
 
 
@@ -21,14 +37,13 @@ mapToLetterObj : String -> List LetterObj
 mapToLetterObj str =
     str
         |> String.split ""
-        |> List.map (\x -> LetterObj x False)
+        |> List.map (LetterObj False)
 
 
-displayWord : List LetterObj -> String
+displayWord : List LetterObj -> List String
 displayWord list =
     list
         |> List.map showLetter
-        |> String.concat
 
 
 showLetter : LetterObj -> String
@@ -43,7 +58,7 @@ showLetter obj =
 
 mapLetterObjToWord : List LetterObj -> List String
 mapLetterObjToWord letterObj =
-    List.map (\obj -> obj.letter) letterObj
+    List.map (\obj -> String.toLower obj.letter) letterObj
 
 
 checkGuess : Model -> ( Model, Cmd Msg )
@@ -84,12 +99,11 @@ checkForWin model =
     in
     case result of
         True ->
-            ( { model | gameStatus = "You Won with " ++ String.fromInt model.turns ++ " turns remaining!!!" }
-            , Cmd.none
+            ( { model | gameStatus = "You Won with " ++ String.fromInt model.turns ++ " turns remaining!!!", gameCondition = Win }
+            , callToActionCommand
             )
 
         False ->
-            -- TODO:
             ( model
             , Cmd.none
             )
@@ -98,14 +112,33 @@ checkForWin model =
 checkForLoss : Model -> ( Model, Cmd Msg )
 checkForLoss model =
     if model.turns == 0 then
-        ( { model | gameStatus = "You lost (LOL)" }
-        , Cmd.none
+        ( { model | gameStatus = "You lost (LOL)", gameCondition = Lose }
+        , Task.perform ChangeMsg (Process.sleep 1500)
         )
 
     else
         ( model
         , Cmd.none
         )
+
+
+letterRegex : Regex.Regex
+letterRegex =
+    Maybe.withDefault Regex.never <| Regex.fromString "^[a-zA-Z]{0,1}$"
+
+
+compareIndex : List Int -> Int -> LetterObj -> LetterObj
+compareIndex listOfRandomLetters index letterObj =
+    let
+        bool =
+            List.member index listOfRandomLetters
+    in
+    case bool of
+        True ->
+            { letterObj | isShowing = True }
+
+        False ->
+            letterObj
 
 
 
@@ -117,24 +150,43 @@ type alias Model =
     , word : List LetterObj
     , wrongLetters : List String
     , gameStatus : String
+    , gameCondition : GameCondition
     , turns : Int
+    , callToAction : Bool
     }
+
+
+getWordCommand : Cmd Msg
+getWordCommand =
+    Random.generate NewNumber (Random.int 0 (Array.length Word.wordList))
+
+
+getRandomIntList : Int -> Cmd Msg
+getRandomIntList length =
+    Random.generate RevealRandomLetters (Random.list (length // 3) (Random.int 0 length))
+
+
+callToActionCommand : Cmd Msg
+callToActionCommand =
+    Task.perform CallToAction (Process.sleep 1500)
 
 
 initModel : Model
 initModel =
     { guess = ""
-    , word = mapToLetterObj Word.word
     , wrongLetters = []
-    , gameStatus = "Take a Guess"
+    , gameStatus = "Take a guess"
     , turns = 5
+    , word = mapToLetterObj ""
+    , gameCondition = Play
+    , callToAction = False
     }
 
 
 init : ( Model, Cmd Msg )
 init =
     ( initModel
-    , Cmd.none
+    , getWordCommand
     )
 
 
@@ -147,6 +199,11 @@ type Msg
     | WordInput String
     | FormSubmit
     | ResetGame
+    | RevealWord ()
+    | ChangeMsg ()
+    | NewNumber Int
+    | CallToAction ()
+    | RevealRandomLetters (List Int)
 
 
 
@@ -161,17 +218,52 @@ update msg model =
             , Cmd.none
             )
 
-        WordInput letter ->
-            ( { model | guess = letter }
+        NewNumber num ->
+            ( { model | word = mapToLetterObj <| Maybe.withDefault "secret" (Array.get num Word.wordList) }
+            , getRandomIntList (List.length model.word)
+            )
+
+        RevealRandomLetters list ->
+            let
+                modifiedWord =
+                    List.indexedMap (compareIndex (Debug.log "list" list)) model.word
+            in
+            ( { model | word = modifiedWord }
             , Cmd.none
             )
+
+        WordInput letter ->
+            if Regex.contains letterRegex letter then
+                ( { model | guess = String.toLower letter }
+                , Cmd.none
+                )
+
+            else
+                ( model
+                , Cmd.none
+                )
 
         FormSubmit ->
             checkGuess model
 
         ResetGame ->
             ( initModel
+            , getWordCommand
+            )
+
+        CallToAction _ ->
+            ( { model | callToAction = True }
             , Cmd.none
+            )
+
+        RevealWord _ ->
+            ( { model | word = List.map (\lettObj -> { lettObj | isShowing = True }) model.word }
+            , Task.perform CallToAction (Process.sleep 1500)
+            )
+
+        ChangeMsg _ ->
+            ( { model | gameStatus = "The Correct word was..." }
+            , Task.perform RevealWord (Process.sleep 1500)
             )
 
 
@@ -183,16 +275,73 @@ view : Model -> Html Msg
 view model =
     div [ class "App" ]
         [ h1 [ id "title" ] [ text "Hangman Game" ]
-        , div [ class "msg" ] [ text model.gameStatus ]
-        , div [ class "wordDisplay" ] [ text (displayWord model.word) ]
-        , div [ class "wrongLetters" ] [ text (String.concat model.wrongLetters) ]
+        , div [ class "msg", class (gold model.gameCondition) ] [ text model.gameStatus ]
+        , div [ class "wordDisplay" ] (displayLetters (displayWord model.word))
+        , div [ class "wrongLetters" ] (displayWrongLetters model.wrongLetters)
         , div [ class "guessesLeft" ]
             [ p [] [ text ("Guesses Left: " ++ String.fromInt model.turns) ] ]
         , Html.form [ onSubmit FormSubmit ]
-            [ input [ type_ "text", name "guess", required True, onInput WordInput, value model.guess ] []
+            [ input [ type_ "text", name "guess", required True, onInput WordInput, value model.guess, disabled (disableInput model.gameCondition) ] []
             ]
-        , button [ class "btn", onClick ResetGame ] [ text "New Word" ]
+        , button [ class "btn", class (callToAction model.callToAction), onClick ResetGame, maxlength 1 ] [ text "New Word" ]
         ]
+
+
+
+-- class setters --
+
+
+gold : GameCondition -> String
+gold gc =
+    case gc of
+        Win ->
+            "gold"
+
+        _ ->
+            ""
+
+
+callToAction : Bool -> String
+callToAction bool =
+    case bool of
+        True ->
+            "callToAction"
+
+        False ->
+            ""
+
+
+
+-- view helpers --
+
+
+displayLetters : List String -> List (Html Msg)
+displayLetters list =
+    List.map (\letter -> span [ class "letter" ] [ text letter ]) list
+
+
+displayWrongLetters : List String -> List (Html Msg)
+displayWrongLetters list =
+    [ h4 [ class "wrongLetters__heading" ] [ text "Wrong Letters: " ]
+    , div [ class "wrongLetters__container" ]
+        [ p [ class "wrongLetters__text" ]
+            [ List.map (\letter -> letter ++ ", ") (List.take (List.length list - 1) list)
+                ++ List.drop (List.length list - 1) list
+                |> String.concat
+                |> text
+            ]
+        ]
+    ]
+
+
+disableInput : GameCondition -> Bool
+disableInput gc =
+    case gc of
+        Play ->
+            False
+
+        _ ->
+            True
 
 
 

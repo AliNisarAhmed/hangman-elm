@@ -215,7 +215,9 @@ update msg model =
             )
 
         NewNumber num ->
-            let modifiedWord = mapToLetterObj <| Maybe.withDefault "secret" (Array.get num Word.wordList)
+            let
+                modifiedWord =
+                    mapToLetterObj <| Maybe.withDefault "secret" (Array.get num Word.wordList)
             in
             ( { model | word = modifiedWord }
             , getRandomIntList (List.length modifiedWord)
@@ -224,7 +226,7 @@ update msg model =
         RevealRandomLetters list ->
             let
                 modifiedWord =
-                    List.indexedMap (compareIndex (Debug.log "list" list)) model.word
+                    List.indexedMap (compareIndex list) model.word
             in
             ( { model | word = modifiedWord }
             , Cmd.none

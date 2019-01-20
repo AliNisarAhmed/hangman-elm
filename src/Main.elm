@@ -73,7 +73,7 @@ checkGuess model =
         -- then we need to unveil that letter
     then
         -- unveil the letter, then pass on the updated model to checkForWin
-        -- unveilLetter was provided to List.map as partially applied with model, await LetterObj from the map
+        -- unveilLetter was provided to List.map as partially applied with model, awaits letterObj from the map
         checkForWin { model | word = List.map (unveilLetter model) model.word, guess = "" }
 
     else
@@ -206,10 +206,6 @@ type Msg
     | RevealRandomLetters (List Int)
 
 
-
--- | CheckForWin
-
-
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -219,8 +215,10 @@ update msg model =
             )
 
         NewNumber num ->
-            ( { model | word = mapToLetterObj <| Maybe.withDefault "secret" (Array.get num Word.wordList) }
-            , getRandomIntList (List.length model.word)
+            let modifiedWord = mapToLetterObj <| Maybe.withDefault "secret" (Array.get num Word.wordList)
+            in
+            ( { model | word = modifiedWord }
+            , getRandomIntList (List.length modifiedWord)
             )
 
         RevealRandomLetters list ->

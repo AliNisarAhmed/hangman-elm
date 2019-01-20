@@ -76,6 +76,11 @@ checkGuess model =
         -- unveilLetter was provided to List.map as partially applied with model, awaits letterObj from the map
         checkForWin { model | word = List.map (unveilLetter model) model.word, guess = "" }
 
+    else if List.member model.guess model.wrongLetters then
+        ( { model | guess = "", gameStatus = "You have already used that letter" }
+        , Task.perform RevertGameStatusMsg (Process.sleep 1500)
+        )
+
     else
         checkForLoss { model | wrongLetters = List.append model.wrongLetters (List.singleton model.guess), guess = "", turns = model.turns - 1 }
 
@@ -204,6 +209,7 @@ type Msg
     | NewNumber Int
     | CallToAction ()
     | RevealRandomLetters (List Int)
+    | RevertGameStatusMsg ()
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -264,6 +270,11 @@ update msg model =
         ChangeMsg _ ->
             ( { model | gameStatus = "The Correct word was..." }
             , Task.perform RevealWord (Process.sleep 1500)
+            )
+
+        RevertGameStatusMsg _ ->
+            ( { model | gameStatus = "Take a guess" }
+            , Cmd.none
             )
 
 
